@@ -1,18 +1,51 @@
 import * as stream from 'stream';
 
 import * as cxml from 'cxml';
-import { Geometry, Point, LineString, Polygon } from 'geobabel';
+import * as geo from 'geobabel';
+
+declare module 'geobabel/dist/geometry/Geometry' {
+
+	interface Geometry {
+		writeGML(config: cxml.ParserConfig, output?: cxml.TokenBuffer): cxml.TokenBuffer;
+	}
+
+}
+
+declare module 'geobabel/dist/geometry/GeometryCollection' {
+
+	interface GeometryCollection {
+		multiName: string;
+		membersName: string;
+	}
+
+}
 
 const tokenTbl: cxml.TokenTbl = {
 	gml: {
 		uri: 'http://www.opengis.net/gml',
 		elements: [
-			'LineString',
-			'LinearRing',
 			'Point',
+			'LineString',
 			'Polygon',
+
+			'MultiGeometry',
+			'MultiPoint',
+			'MultiLineString',
+			'MultiPolygon',
+			'MultiCurve',
+			'MultiSurface',
+
+			'geometryMembers',
+			'pointMembers',
+			'lineStringMembers',
+			'polygonMembers',
+			'curveMembers',
+			'surfaceMembers',
+
 			'exterior',
 			'interior',
+			'LinearRing',
+
 			'pos',
 			'posList'
 		],
@@ -23,20 +56,169 @@ const tokenTbl: cxml.TokenTbl = {
 	}
 };
 
+geo.Point.prototype.writeGML = function(
+	this: geo.Point,
+	config: cxml.ParserConfig,
+	output: cxml.TokenBuffer = []
+) {
+	const tokens = config.registry.tokens;
+	const gml_Point = tokens['gml:Point'] as cxml.OpenToken;
+	const gml_pos = tokens['gml:pos'] as cxml.OpenToken;
+
+	output.push(
+		gml_Point,
+		gml_Point.emitted,
+		gml_pos,
+		gml_pos.emitted,
+		this.pos.join(' '),
+		gml_pos.close,
+		gml_Point.close
+	);
+
+	return(output);
+}
+
+geo.LineString.prototype.writeGML = function(
+	this: geo.LineString,
+	config: cxml.ParserConfig,
+	output: cxml.TokenBuffer = []
+) {
+	const tokens = config.registry.tokens;
+	const gml_LineString = tokens['gml:LineString'] as cxml.OpenToken;
+	const gml_posList = tokens['gml:posList'] as cxml.OpenToken;
+
+	output.push(
+		gml_LineString,
+		gml_LineString.emitted,
+		gml_posList,
+		gml_posList.emitted,
+		geo.writePosListWKT(this.posList),
+		gml_posList.close,
+		gml_LineString.close
+	);
+
+	return(output);
+}
+
+geo.Polygon.prototype.writeGML = function(
+	this: geo.Polygon,
+	config: cxml.ParserConfig,
+	output: cxml.TokenBuffer = []
+) {
+	const tokens = config.registry.tokens;
+	const gml_Polygon = tokens['gml:Polygon'] as cxml.OpenToken;
+	const gml_LinearRing = tokens['gml:LinearRing'] as cxml.OpenToken;
+	const gml_posList = tokens['gml:posList'] as cxml.OpenToken;
+	const gml_interior = tokens['gml:interior'] as cxml.OpenToken;
+	let wrapper = tokens['gml:exterior'] as cxml.OpenToken;
+
+	output.push(
+		gml_Polygon,
+		gml_Polygon.emitted,
+	);
+
+	const ringCount = this.ringList.length;
+	let ring: number[] | null | undefined;
+
+	for(let ringNum = 0; ringNum < ringCount; ++ringNum) {
+		ring = this.ringList[ringNum];
+
+		if(ring) {
+			output.push(
+				wrapper,
+				wrapper.emitted,
+				gml_LinearRing,
+				gml_LinearRing.emitted,
+				gml_posList,
+				gml_posList.emitted,
+				geo.writePosListWKT(ring),
+				gml_posList.close,
+				gml_LinearRing.close,
+				wrapper.close,
+			);
+		}
+
+		wrapper = gml_interior;
+	}
+
+	output.push(
+		gml_Polygon.close
+	);
+
+	return(output);
+}
+
+geo.GeometryCollection.prototype.multiName = 'gml:MultiGeometry';
+geo.GeometryCollection.prototype.membersName = 'gml:geometryMembers';
+
+geo.MultiPoint.prototype.multiName = 'gml:MultiPoint';
+geo.MultiPoint.prototype.membersName = 'gml:pointMembers';
+
+geo.MultiLineString.prototype.multiName = 'gml:MultiLineString';
+geo.MultiLineString.prototype.membersName = 'gml:lineStringMembers';
+
+geo.MultiPolygon.prototype.multiName = 'gml:MultiPolygon';
+geo.MultiPolygon.prototype.membersName = 'gml:polygonMembers';
+
+geo.MultiCurve.prototype.multiName = 'gml:MultiCurve';
+geo.MultiCurve.prototype.membersName = 'gml:curveMembers';
+
+geo.MultiSurface.prototype.multiName = 'gml:MultiSurface';
+geo.MultiSurface.prototype.membersName = 'gml:surfaceMembers';
+
+geo.GeometryCollection.prototype.writeGML = function(
+	this: geo.GeometryCollection,
+	config: cxml.ParserConfig,
+	output: cxml.TokenBuffer = []
+) {
+	const tokens = config.registry.tokens;
+	const gml_Multi = tokens[this.multiName] as cxml.OpenToken;
+	const gml_Members = tokens[this.membersName] as cxml.OpenToken;
+
+	output.push(
+		gml_Multi,
+		gml_Multi.emitted,
+		gml_Members,
+		gml_Members.emitted,
+	);
+
+	for(let child of this.childList) {
+		if(child.writeGML) child.writeGML(config, output);
+	}
+
+	output.push(
+		gml_Members.close,
+		gml_Multi.close
+	);
+
+	return(output);
+}
+
+export class GeometryToken extends cxml.Token {
+
+	constructor(public geometry: geo.Geometry) { super(); }
+
+	serialize(indent: string, config: cxml.ParserConfig): string | cxml.TokenBuffer {
+		return(this.geometry.writeGML(config));
+	}
+
+}
+
 export class Parser<WrapperToken extends cxml.Token> {
 
-	constructor(public Wrapper: { new(geometry: Geometry): WrapperToken }) {
-		this.xmlConfig = new cxml.ParserConfig({ parseUnknown: true });
+	constructor(public Wrapper: { new(geometry: geo.Geometry): WrapperToken }) {
+		this.config = new cxml.ParserConfig({ parseUnknown: true });
 
-		this.xmlConfig.bindNamespace(cxml.processing);
-		this.xmlConfig.bindNamespace(cxml.anonymous);
-		this.xmlConfig.addNamespace(cxml.xml1998);
+		this.config.bindNamespace(cxml.processing);
+		this.config.bindNamespace(cxml.anonymous);
+		this.config.addNamespace(cxml.xml1998);
+		this.config.addNamespace(new cxml.Namespace('gml', 'http://www.opengis.net/gml'));
 
-		this.registry = this.xmlConfig.registerTokens(tokenTbl);
+		this.registry = this.config.registerTokens(tokenTbl);
 	}
 
 	parse(streamIn: stream.Readable) {
-		const xmlParser = this.xmlConfig.createParser();
+		const xmlParser = this.config.createParser();
 		const streamOut = new ParserStream(this.Wrapper, this.registry);
 
 		streamIn.pipe(xmlParser).pipe(streamOut);
@@ -44,14 +226,14 @@ export class Parser<WrapperToken extends cxml.Token> {
 		return(streamOut);
 	}
 
-	xmlConfig: cxml.ParserConfig;
+	config: cxml.ParserConfig;
 	registry: cxml.Registry;
 }
 
 export class ParserStream<WrapperToken extends cxml.Token> extends stream.Transform {
 
 	constructor(
-		public Wrapper: { new(geometry: Geometry): WrapperToken },
+		public Wrapper: { new(geometry: geo.Geometry): WrapperToken },
 		private registry: cxml.Registry
 	) {
 		super({ objectMode: true });
@@ -64,14 +246,15 @@ export class ParserStream<WrapperToken extends cxml.Token> extends stream.Transf
 		}
 
 		const output: cxml.TokenBuffer = [];
-		const gml_Point = this.registry.names['gml:Point'];
-		const gml_LineString = this.registry.names['gml:LineString'];
-		const gml_Polygon = this.registry.names['gml:Polygon'];
-		const gml_interior = this.registry.names['gml:interior'];
-		const gml_exterior = this.registry.names['gml:exterior'];
-		const gml_LinearRing = this.registry.names['gml:LinearRing'];
-		const gml_pos = this.registry.names['gml:pos'];
-		const gml_posList = this.registry.names['gml:posList'];
+		const tokens = this.registry.tokens;
+		const gml_Point = tokens['gml:Point'].id;
+		const gml_LineString = tokens['gml:LineString'].id;
+		const gml_Polygon = tokens['gml:Polygon'].id;
+		const gml_interior = tokens['gml:interior'].id;
+		const gml_exterior = tokens['gml:exterior'].id;
+		const gml_LinearRing = tokens['gml:LinearRing'].id;
+		const gml_pos = tokens['gml:pos'].id;
+		const gml_posList = tokens['gml:posList'].id;
 
 		let token = chunk[0];
 
@@ -106,7 +289,7 @@ export class ParserStream<WrapperToken extends cxml.Token> extends stream.Transf
 							if(token.kind == cxml.TokenKind.open) {
 								coordList = [];
 							} else if(token.kind == cxml.TokenKind.close && coordList) {
-								output.push(new this.Wrapper(new Point(coordList[0], coordList[1])));
+								output.push(new this.Wrapper(new geo.Point(coordList[0], coordList[1])));
 								coordList = void 0;
 							}
 
@@ -117,7 +300,7 @@ export class ParserStream<WrapperToken extends cxml.Token> extends stream.Transf
 							if(token.kind == cxml.TokenKind.open) {
 								coordList = [];
 							} else if(token.kind == cxml.TokenKind.close && coordList) {
-								output.push(new this.Wrapper(new LineString(coordList)));
+								output.push(new this.Wrapper(new geo.LineString(coordList)));
 								coordList = void 0;
 							}
 
@@ -128,7 +311,7 @@ export class ParserStream<WrapperToken extends cxml.Token> extends stream.Transf
 							if(token.kind == cxml.TokenKind.open) {
 								ringList = [ null ];
 							} else if(token.kind == cxml.TokenKind.close && ringList) {
-								output.push(new this.Wrapper(new Polygon(ringList)));
+								output.push(new this.Wrapper(new geo.Polygon(ringList)));
 								ringList = void 0;
 							}
 
