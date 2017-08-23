@@ -206,27 +206,25 @@ export class GeometryToken extends cxml.Token {
 
 export class Parser<WrapperToken extends cxml.Token> {
 
-	constructor(public Wrapper: { new(geometry: geo.Geometry): WrapperToken }) {
-		this.config = new cxml.ParserConfig({ parseUnknown: true });
+	constructor(
+		public Wrapper: { new(geometry: geo.Geometry): WrapperToken },
+		private config?: cxml.ParserConfig
+	) {
+		if(!config) {
+			config = new cxml.ParserConfig({ parseUnknown: true });
+			config.bindNamespace(cxml.processing);
+			config.bindNamespace(cxml.anonymous);
+			config.addNamespace(cxml.xml1998);
+			config.addNamespace(new cxml.Namespace('gml', 'http://www.opengis.net/gml'));
+		}
 
-		this.config.bindNamespace(cxml.processing);
-		this.config.bindNamespace(cxml.anonymous);
-		this.config.addNamespace(cxml.xml1998);
-		this.config.addNamespace(new cxml.Namespace('gml', 'http://www.opengis.net/gml'));
-
-		this.registry = this.config.registerTokens(tokenTbl);
+		this.registry = config.registerTokens(tokenTbl);
 	}
 
-	parse(streamIn: stream.Readable) {
-		const xmlParser = this.config.createParser();
-		const streamOut = new ParserStream(this.Wrapper, this.registry);
-
-		streamIn.pipe(xmlParser).pipe(streamOut);
-
-		return(streamOut);
+	createStream() {
+		return(new ParserStream(this.Wrapper, this.registry));
 	}
 
-	config: cxml.ParserConfig;
 	registry: cxml.Registry;
 }
 
@@ -237,6 +235,21 @@ export class ParserStream<WrapperToken extends cxml.Token> extends stream.Transf
 		private registry: cxml.Registry
 	) {
 		super({ objectMode: true });
+
+		const tokens = this.registry.tokens;
+		const gml_Point = tokens['gml:Point'].id!;
+		const gml_LineString = tokens['gml:LineString'].id!;
+		const gml_Polygon = tokens['gml:Polygon'].id!;
+		const gml_interior = tokens['gml:interior'].id!;
+		const gml_exterior = tokens['gml:exterior'].id!;
+		const gml_LinearRing = tokens['gml:LinearRing'].id!;
+		const gml_pos = tokens['gml:pos'].id!;
+		const gml_posList = tokens['gml:posList'].id!;
+
+		const captureTbl = this.captureTbl;
+		captureTbl[gml_Point] = true;
+		captureTbl[gml_LineString] = true;
+		captureTbl[gml_Polygon] = true;
 	}
 
 	_transform(chunk: cxml.TokenBuffer | null, enc: string, flush: (err: any, chunk: cxml.TokenBuffer | null) => void) {
@@ -247,14 +260,14 @@ export class ParserStream<WrapperToken extends cxml.Token> extends stream.Transf
 
 		const output: cxml.TokenBuffer = [];
 		const tokens = this.registry.tokens;
-		const gml_Point = tokens['gml:Point'].id;
-		const gml_LineString = tokens['gml:LineString'].id;
-		const gml_Polygon = tokens['gml:Polygon'].id;
-		const gml_interior = tokens['gml:interior'].id;
-		const gml_exterior = tokens['gml:exterior'].id;
-		const gml_LinearRing = tokens['gml:LinearRing'].id;
-		const gml_pos = tokens['gml:pos'].id;
-		const gml_posList = tokens['gml:posList'].id;
+		const gml_Point = tokens['gml:Point'].id!;
+		const gml_LineString = tokens['gml:LineString'].id!;
+		const gml_Polygon = tokens['gml:Polygon'].id!;
+		const gml_interior = tokens['gml:interior'].id!;
+		const gml_exterior = tokens['gml:exterior'].id!;
+		const gml_LinearRing = tokens['gml:LinearRing'].id!;
+		const gml_pos = tokens['gml:pos'].id!;
+		const gml_posList = tokens['gml:posList'].id!;
 
 		let token = chunk[0];
 
@@ -267,8 +280,6 @@ export class ParserStream<WrapperToken extends cxml.Token> extends stream.Transf
 		let lastNum = token instanceof cxml.RecycleToken ? token.lastNum : chunk.length - 1;
 		let tokenNum = -1;
 
-		output.push(token);
-
 		while(tokenNum < lastNum) {
 
 			token = chunk[++tokenNum];
@@ -276,12 +287,11 @@ export class ParserStream<WrapperToken extends cxml.Token> extends stream.Transf
 			if(token instanceof cxml.MemberToken) {
 				if(token.kind == cxml.TokenKind.open) {
 					++depth;
-					if(depth < captureDepth && this.registry.elements[token.id!]) captureDepth = depth;
+					if(depth < captureDepth && this.captureTbl[token.id!]) captureDepth = depth;
 				}
 
 				if(token.kind == cxml.TokenKind.string) {
-					if(this.registry.attributes[token.id!]) {
-					} else if(depth < captureDepth) output.push(token);
+					if(depth < captureDepth) output.push(token);
 				} else if(this.registry.elements[token.id!]) {
 					switch(token.id) {
 						case gml_Point:
@@ -351,6 +361,11 @@ export class ParserStream<WrapperToken extends cxml.Token> extends stream.Transf
 							}
 
 							break;
+
+						default:
+
+							if(depth < captureDepth) output.push(token);
+
 					}
 				} else if(depth < captureDepth) output.push(token);
 
@@ -378,6 +393,8 @@ export class ParserStream<WrapperToken extends cxml.Token> extends stream.Transf
 
 	depth = 0;
 	captureDepth = Infinity;
+	captureTbl: (boolean | undefined)[] = []
+
 	isPos = false;
 	coordList: number[] | undefined;
 	ringList: (number[] | null)[] | undefined;
