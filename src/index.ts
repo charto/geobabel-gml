@@ -208,7 +208,7 @@ export class Parser<WrapperToken extends cxml.Token> {
 
 	constructor(
 		public Wrapper: { new(geometry: geo.Geometry): WrapperToken },
-		private config?: cxml.ParserConfig
+		config?: cxml.ParserConfig
 	) {
 		if(!config) {
 			config = new cxml.ParserConfig({ parseUnknown: true });
@@ -219,6 +219,7 @@ export class Parser<WrapperToken extends cxml.Token> {
 		}
 
 		this.registry = config.registerTokens(tokenTbl);
+		this.config = config;
 	}
 
 	createStream() {
@@ -226,6 +227,7 @@ export class Parser<WrapperToken extends cxml.Token> {
 	}
 
 	registry: cxml.Registry;
+	config: cxml.ParserConfig;
 }
 
 export class ParserStream<WrapperToken extends cxml.Token> extends stream.Transform {
