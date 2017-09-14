@@ -49,7 +49,7 @@ export class Parser<WrapperToken extends cxml.Token> {
 			config = new cxml.ParserConfig({ parseUnknown: true });
 			config.bindNamespace(cxml.processing);
 			config.bindNamespace(cxml.anonymous);
-			config.addNamespace(cxml.xml1998);
+			config.bindNamespace(cxml.xml1998);
 			config.addNamespace(new cxml.Namespace('gml', 'http://www.opengis.net/gml'));
 		}
 

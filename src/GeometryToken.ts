@@ -12,8 +12,8 @@ declare module 'geobabel/dist/geometry/Geometry' {
 declare module 'geobabel/dist/geometry/GeometryCollection' {
 
 	interface GeometryCollection {
-		multiName: string;
-		membersName: string;
+		multiName?: string;
+		membersName?: string;
 	}
 
 }
@@ -54,7 +54,7 @@ geo.LineString.prototype.writeGML = function(
 		gml_LineString.emitted,
 		gml_posList,
 		gml_posList.emitted,
-		geo.writePosListWKT(this.posList),
+		this.writeWKT(geo.wktDefaults),
 		gml_posList.close,
 		gml_LineString.close
 	);
@@ -79,13 +79,8 @@ geo.Polygon.prototype.writeGML = function(
 		gml_Polygon.emitted,
 	);
 
-	const ringCount = this.ringList.length;
-	let ring: number[] | null | undefined;
-
-	for(let ringNum = 0; ringNum < ringCount; ++ringNum) {
-		ring = this.ringList[ringNum];
-
-		if(ring) {
+	for(let child of this.childList) {
+		if(child) {
 			output.push(
 				wrapper,
 				wrapper.emitted,
@@ -93,7 +88,7 @@ geo.Polygon.prototype.writeGML = function(
 				gml_LinearRing.emitted,
 				gml_posList,
 				gml_posList.emitted,
-				geo.writePosListWKT(ring),
+				child.writeWKT(geo.wktDefaults),
 				gml_posList.close,
 				gml_LinearRing.close,
 				wrapper.close,
@@ -134,8 +129,8 @@ geo.GeometryCollection.prototype.writeGML = function(
 	output: cxml.TokenBuffer = []
 ) {
 	const tokens = config.registry.tokens;
-	const gml_Multi = tokens[this.multiName] as cxml.OpenToken;
-	const gml_Members = tokens[this.membersName] as cxml.OpenToken;
+	const gml_Multi = tokens[this.multiName!] as cxml.OpenToken;
+	const gml_Members = tokens[this.membersName!] as cxml.OpenToken;
 
 	output.push(
 		gml_Multi,
@@ -145,7 +140,7 @@ geo.GeometryCollection.prototype.writeGML = function(
 	);
 
 	for(let child of this.childList) {
-		if(child.writeGML) child.writeGML(config, output);
+		if(child && child.writeGML) child.writeGML(config, output);
 	}
 
 	output.push(
