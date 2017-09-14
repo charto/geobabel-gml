@@ -39,6 +39,22 @@ const tokenTbl: cxml.TokenTbl = {
 	}
 };
 
+function convertDimension(coordList: number[], src: number, dst: number) {
+	const result: number[] = [];
+
+	if(src > dst) {
+		const count = coordList.length;
+
+		for(let num = 0; num < count; ++num) {
+			if(num % src < dst) result.push(coordList[num]);
+		}
+	} else {
+		// TODO
+	}
+
+	return(result);
+}
+
 export class Parser<WrapperToken extends cxml.Token> {
 
 	constructor(
@@ -106,16 +122,26 @@ export class ParserStream<WrapperToken extends cxml.Token> extends stream.Transf
 		const gml_pos = tokens['gml:pos'].id!;
 		const gml_posList = tokens['gml:posList'].id!;
 
+		const gml_srsName = tokens['gml:srsName'].id!;
+		const gml_srsDimension = tokens['gml:srsDimension'].id!;
+
 		let token = chunk[0];
 
 		let depth = this.depth;
 		let captureDepth = this.captureDepth;
+		let dimension = this.dimension;
 		let isPos = this.isPos;
+		let isDimension = this.isDimension;
 		let coordList = this.coordList;
 		let ringList = this.ringList;
 
-		let lastNum = token instanceof cxml.RecycleToken ? token.lastNum : chunk.length - 1;
+		let lastNum = chunk.length - 1;
 		let tokenNum = -1;
+
+		if(token instanceof cxml.RecycleToken) {
+			lastNum = token.lastNum;
+			++tokenNum;
+		}
 
 		while(tokenNum < lastNum) {
 
@@ -128,6 +154,7 @@ export class ParserStream<WrapperToken extends cxml.Token> extends stream.Transf
 				}
 
 				if(token.kind == cxml.TokenKind.string) {
+					if(token.id == gml_srsDimension) isDimension = true;
 					if(depth < captureDepth) output.push(token);
 				} else if(this.registry.elements[token.id!]) {
 					switch(token.id) {
@@ -147,6 +174,7 @@ export class ParserStream<WrapperToken extends cxml.Token> extends stream.Transf
 							if(token.kind == cxml.TokenKind.open) {
 								coordList = [];
 							} else if(token.kind == cxml.TokenKind.close && coordList) {
+								if(dimension != 2) coordList = convertDimension(coordList, dimension, 2);
 								output.push(new this.Wrapper(new geo.LineString(coordList)));
 								coordList = void 0;
 							}
@@ -168,6 +196,7 @@ export class ParserStream<WrapperToken extends cxml.Token> extends stream.Transf
 						case gml_exterior:
 
 							if(token.kind == cxml.TokenKind.close && ringList && coordList) {
+								if(dimension != 2) coordList = convertDimension(coordList, dimension, 2);
 								if(token.id == gml_interior) {
 									ringList.push(coordList);
 								} else {
@@ -191,7 +220,9 @@ export class ParserStream<WrapperToken extends cxml.Token> extends stream.Transf
 						case gml_pos:
 						case gml_posList:
 
-							if(token.kind == cxml.TokenKind.emitted) {
+							if(token.kind == cxml.TokenKind.open) {
+								dimension = 2;
+							} if(token.kind == cxml.TokenKind.emitted) {
 								isPos = true;
 							} else if(token.kind == cxml.TokenKind.close) {
 								isPos = false;
@@ -210,12 +241,25 @@ export class ParserStream<WrapperToken extends cxml.Token> extends stream.Transf
 					--depth;
 					if(depth < captureDepth) captureDepth = Infinity;
 				}
-			} else {
-				if(typeof(token) == 'string' && isPos && coordList) {
-					coordList.push.apply(coordList, token.split(' ').map((num: string) => +num))
-				} else if(depth < captureDepth) {
-					output.push(token);
+
+				continue;
+			}
+
+			if(typeof(token) == 'string') {
+				if(isPos && coordList) {
+					coordList.push.apply(coordList, token.split(' ').map((num: string) => +num));
+					continue;
 				}
+
+				if(isDimension) {
+					dimension = +token;
+					isDimension = false;
+					continue;
+				}
+			}
+
+			if(depth < captureDepth) {
+				output.push(token);
 			}
 		}
 
@@ -223,7 +267,9 @@ export class ParserStream<WrapperToken extends cxml.Token> extends stream.Transf
 
 		this.depth = depth;
 		this.captureDepth = captureDepth;
+		this.dimension = dimension;
 		this.isPos = isPos;
+		this.isDimension = isDimension;
 		this.coordList = coordList;
 		this.ringList = ringList;
 	}
@@ -232,7 +278,10 @@ export class ParserStream<WrapperToken extends cxml.Token> extends stream.Transf
 	captureDepth = Infinity;
 	captureTbl: (boolean | undefined)[] = []
 
+	dimension = 2;
+
 	isPos = false;
+	isDimension = false;
 	coordList: number[] | undefined;
 	ringList: (number[] | null)[] | undefined;
 }
